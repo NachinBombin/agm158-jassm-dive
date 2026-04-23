@@ -10,6 +10,8 @@ local BACK_OFFSET = 55
 local FLAME_SCALE = 0.55
 
 function ENT:Initialize()
+	self:SetRenderBounds(Vector(-120, -120, -120), Vector(120, 120, 120))
+
 	self._flameProp = ClientsideModel(FLAME_MODEL)
 	if IsValid(self._flameProp) then
 		self._flameProp:SetPos(self:GetPos())
@@ -20,6 +22,7 @@ function ENT:Initialize()
 end
 
 function ENT:Draw()
+	self:SetupBones()
 	self:DrawModel()
 
 	if not IsValid(self._flameProp) then return end
