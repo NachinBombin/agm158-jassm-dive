@@ -12,28 +12,25 @@ local BACK_OFFSET = 55
 local FLAME_SCALE = 0.55
 
 function ENT:Initialize()
-	-- Apply bodygroup locally -- custom Draw() / DrawModel() bypasses
-	-- networked bodygroup state, so we must set it on the client too.
-	self:SetBodygroup(0, 1)
+	-- Group 1 = wings. Must be set client-side too because our custom
+	-- Draw() / DrawModel() renders the local entity directly and does
+	-- not auto-apply networked bodygroup state from the server.
+	self:SetBodygroup(1, 1)
 
 	-- Defer flame prop creation by one frame.
-	-- If the model is missing this errors in the timer, not here,
-	-- so the entity Initialize always completes and DrawModel works.
 	timer.Simple(0, function()
 		if not IsValid(self) then return end
 		self._flameProp = ClientsideModel(FLAME_MODEL)
 		if IsValid(self._flameProp) then
 			self._flameProp:SetModelScale(FLAME_SCALE, 0)
-			self._flameProp:SetNoDraw(true) -- we manually call DrawModel in ENT:Draw
+			self._flameProp:SetNoDraw(true)
 		end
 	end)
 end
 
 function ENT:Draw()
-	-- Always draw the missile body first.
 	self:DrawModel()
 
-	-- Draw flame prop if it loaded.
 	if not IsValid(self._flameProp) then return end
 
 	local exhaustPos = self:GetPos() + (-self:GetForward()) * BACK_OFFSET
