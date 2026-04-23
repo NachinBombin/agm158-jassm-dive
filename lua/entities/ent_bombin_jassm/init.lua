@@ -9,6 +9,7 @@ include("shared.lua")
 local ENGINE_LOOP_SOUND = "jet/luxor/external.wav"
 
 ENT.WeaponWindow       = 8
+ENT.FadeDuration       = 2.0
 ENT.DIVE_Speed         = 2200
 ENT.DIVE_TrackInterval = 0.1
 
@@ -18,16 +19,6 @@ ENT.DIVE_TrackInterval = 0.1
 
 function ENT:StopAllSounds()
 	if self.EngineLoop then self.EngineLoop:Stop() self.EngineLoop = nil end
-end
-
-function ENT:FadeAndStopSounds(fadeTime)
-	local t = fadeTime or 0.5
-	local e = self.EngineLoop
-	self.EngineLoop = nil
-	if e then e:ChangeVolume(0, t) end
-	timer.Simple(t + 0.15, function()
-		if e then e:Stop() end
-	end)
 end
 
 function ENT:Debug(msg)
@@ -85,11 +76,15 @@ function ENT:Initialize()
 	end
 
 	self:SetModel("models/sw/avia/agm158/sw_rocket_agm158_v3.mdl")
-	self:SetBodygroup(0, 1)
-	self:SetMoveType(MOVETYPE_NOCLIP)
-	self:SetSolid(SOLID_BBOX)
+	self:PhysicsInit(SOLID_VPHYSICS)
+	self:SetMoveType(MOVETYPE_VPHYSICS)
+	self:SetSolid(SOLID_VPHYSICS)
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
+	self:SetBodygroup(0, 1)
+
+	self:SetRenderMode(RENDERMODE_TRANSALPHA)
+	self:SetColor(Color(255, 255, 255, 0))
 
 	self:SetNWInt("HP",    self.MaxHP)
 	self:SetNWInt("MaxHP", self.MaxHP)
@@ -123,7 +118,13 @@ function ENT:Initialize()
 	self.WanderRateX   = math.Rand(0.004, 0.010)
 	self.WanderRateY   = math.Rand(0.003, 0.009)
 
-	-- Sound: AN-71 pattern -- entity-attached, 3D positional
+	self.PhysObj = self:GetPhysicsObject()
+	if IsValid(self.PhysObj) then
+		self.PhysObj:Wake()
+		self.PhysObj:EnableGravity(false)
+	end
+
+	-- AN-71 pattern: entity-attached, 3D positional
 	self.EngineLoop = CreateSound(self, ENGINE_LOOP_SOUND)
 	if self.EngineLoop then
 		self.EngineLoop:SetSoundLevel(85)
@@ -182,7 +183,7 @@ end
 -- ============================================================
 
 function ENT:Think()
-	if not self.DieTime then
+	if not self.DieTime or not self.SpawnTime then
 		self:NextThink(CurTime() + 0.05)
 		return true
 	end
@@ -190,8 +191,24 @@ function ENT:Think()
 	local ct = CurTime()
 	if ct >= self.DieTime then self:Remove() return end
 
-	local dt = 0.05
+	if not IsValid(self.PhysObj) then
+		self.PhysObj = self:GetPhysicsObject()
+	end
+	if IsValid(self.PhysObj) and self.PhysObj:IsAsleep() then
+		self.PhysObj:Wake()
+	end
 
+	local age  = ct - self.SpawnTime
+	local left = self.DieTime - ct
+	local alpha = 255
+	if age < self.FadeDuration then
+		alpha = math.Clamp(255 * (age / self.FadeDuration), 0, 255)
+	elseif left < self.FadeDuration then
+		alpha = math.Clamp(255 * (left / self.FadeDuration), 0, 255)
+	end
+	self:SetColor(Color(255, 255, 255, math.Round(alpha)))
+
+	local dt = 0.05
 	if self.Diving then
 		self:UpdateDive(ct, dt)
 	else
@@ -255,6 +272,11 @@ function ENT:UpdateOrbit(ct, dt)
 	self.ang.p         = self.SmoothedPitch
 	self.ang.r         = self.SmoothedRoll
 	self:SetAngles(self.ang)
+
+	if IsValid(self.PhysObj) then
+		local forward = self:GetForward()
+		self.PhysObj:SetVelocity(forward * self.Speed)
+	end
 
 	if not self:IsInWorld() then
 		self:Debug("Out of world -- removing")
@@ -339,6 +361,11 @@ function ENT:InitDive(ct)
 	self.DiveAimOffset      = Vector(math.Rand(-400,400), math.Rand(-400,400), 0)
 
 	self:SetCollisionGroup(COLLISION_GROUP_NONE)
+	self:SetSolid(SOLID_VPHYSICS)
+	if IsValid(self.PhysObj) then
+		self.PhysObj:EnableGravity(false)
+	end
+
 	self:Debug("DIVE: committed -- aim offset " .. tostring(self.DiveAimOffset))
 end
 
@@ -401,7 +428,11 @@ function ENT:UpdateDive(ct, dt)
 	})
 	if tr.Hit then self:DiveExplode(tr.HitPos) return end
 
-	self:SetPos(nextPos)
+	if IsValid(self.PhysObj) then
+		self.PhysObj:SetVelocity(totalVel)
+	else
+		self:SetPos(nextPos)
+	end
 end
 
 -- ============================================================
@@ -425,8 +456,8 @@ function ENT:DiveExplode(pos)
 	E("500lb_air",          pos + Vector(0,0,160), 5)
 	E("HelicopterMegaBomb", pos + Vector(0,0,20),  6)
 
-	sound.Play("weapon_AWP.Single",               pos,               155, 52, 1.0)
-	sound.Play("ambient/explosions/explode_8.wav", pos,               150, 78, 1.0)
+	sound.Play("weapon_AWP.Single",               pos,                155, 52, 1.0)
+	sound.Play("ambient/explosions/explode_8.wav", pos,                150, 78, 1.0)
 	sound.Play("ambient/explosions/explode_8.wav", pos+Vector(0,0,40), 145, 85, 0.9)
 
 	util.BlastDamage(self, self, pos, self.DIVE_ExplosionRadius, self.DIVE_ExplosionDamage)

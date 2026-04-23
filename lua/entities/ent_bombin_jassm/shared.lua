@@ -8,4 +8,7 @@ ENT.Category       = "Bombin Support"
 ENT.Spawnable      = false
 ENT.AdminSpawnable = false
 
-ENT.RenderGroup    = RENDERGROUP_OPAQUE
+-- RENDERGROUP_OPAQUE is client-only; guard it so shared.lua doesn't crash on the server
+if CLIENT then
+	ENT.RenderGroup = RENDERGROUP_OPAQUE
+end
