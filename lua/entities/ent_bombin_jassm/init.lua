@@ -14,7 +14,7 @@ ENT.DIVE_Speed         = 2200
 ENT.DIVE_TrackInterval = 0.1
 
 -- ============================================================
--- SOUND HELPERS
+-- HELPERS
 -- ============================================================
 
 function ENT:StopAllSounds()
@@ -82,8 +82,12 @@ function ENT:Initialize()
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
 
-	-- Bodygroup 0, submodel 1 = wings deployed
+	-- Bodygroup 0 submodel 1 = wings deployed
 	self:SetBodygroup(0, 1)
+
+	-- Start fully transparent, fade in via Think
+	self:SetRenderMode(RENDERMODE_TRANSALPHA)
+	self:SetColor(Color(255, 255, 255, 0))
 
 	self:SetNWInt("HP",    self.MaxHP)
 	self:SetNWInt("MaxHP", self.MaxHP)
@@ -175,7 +179,7 @@ function ENT:OnTakeDamage(dmginfo)
 end
 
 -- ============================================================
--- THINK
+-- THINK  (timer, fade, weapon window)
 -- ============================================================
 
 function ENT:Think()
@@ -194,11 +198,20 @@ function ENT:Think()
 		self.PhysObj:Wake()
 	end
 
-	local dt = 0.05
+	-- Alpha fade in / fade out
+	local age  = ct - self.SpawnTime
+	local left = self.DieTime - ct
+	local alpha = 255
+	if age < self.FadeDuration then
+		alpha = math.Clamp(255 * (age / self.FadeDuration), 0, 255)
+	elseif left < self.FadeDuration then
+		alpha = math.Clamp(255 * (left / self.FadeDuration), 0, 255)
+	end
+	self:SetColor(Color(255, 255, 255, math.Round(alpha)))
+
 	if self.Diving then
-		self:UpdateDive(ct, dt)
+		self:UpdateDive(ct)
 	else
-		self:UpdateOrbit(ct, dt)
 		self:HandleWeaponWindow(ct)
 	end
 
@@ -207,13 +220,17 @@ function ENT:Think()
 end
 
 -- ============================================================
--- ORBIT FLIGHT
+-- ORBIT FLIGHT  (runs inside physics simulation, like learn-dive)
 -- ============================================================
 
-function ENT:UpdateOrbit(ct, dt)
-	if not self.sky then return end
+function ENT:PhysicsUpdate(phys)
+	if not self.DieTime or not self.sky then return end
+	if self.Diving then return end
+	if CurTime() >= self.DieTime then self:Remove() return end
 
 	local pos = self:GetPos()
+	local dt  = FrameTime()
+	if dt <= 0 then dt = 0.01 end
 
 	self.WanderPhaseX = self.WanderPhaseX + self.WanderRateX
 	self.WanderPhaseY = self.WanderPhaseY + self.WanderRateY
@@ -239,16 +256,20 @@ function ENT:UpdateOrbit(ct, dt)
 	local jitter = math.sin(self.JitterPhase)  * self.JitterAmp1
 	             + math.sin(self.JitterPhase2) * self.JitterAmp2
 
-	if ct >= self.AltDriftNextPick then
+	if CurTime() >= self.AltDriftNextPick then
 		self.AltDriftTarget   = self.sky + math.Rand(-self.AltDriftRange, self.AltDriftRange)
-		self.AltDriftNextPick = ct + math.Rand(10, 25)
+		self.AltDriftNextPick = CurTime() + math.Rand(10, 25)
 	end
 	self.AltDriftCurrent = Lerp(self.AltDriftLerp, self.AltDriftCurrent, self.AltDriftTarget)
 	local liveAlt = self.AltDriftCurrent + jitter
 
-	local newX = Lerp(0.08, pos.x, desiredX)
-	local newY = Lerp(0.08, pos.y, desiredY)
-	self:SetPos(Vector(newX, newY, liveAlt))
+	local posErr = Vector(desiredX - pos.x, desiredY - pos.y, 0)
+	local vel    = self:GetForward() * self.Speed
+	if posErr:LengthSqr() > 400 then
+		vel = vel + posErr:GetNormalized() * 80
+	end
+
+	self:SetPos(Vector(pos.x, pos.y, liveAlt))
 
 	local rawYawDelta  = math.NormalizeAngle(self.ang.y - (self.PrevYaw or self.ang.y))
 	self.PrevYaw       = self.ang.y
@@ -259,9 +280,8 @@ function ENT:UpdateOrbit(ct, dt)
 	self.ang.r         = self.SmoothedRoll
 	self:SetAngles(self.ang)
 
-	if IsValid(self.PhysObj) then
-		local forward = self:GetForward()
-		self.PhysObj:SetVelocity(forward * self.Speed)
+	if IsValid(phys) then
+		phys:SetVelocity(vel)
 	end
 
 	if not self:IsInWorld() then
@@ -279,10 +299,7 @@ function ENT:GetPrimaryTarget()
 	for _, ply in ipairs(player.GetAll()) do
 		if not IsValid(ply) or not ply:Alive() then continue end
 		local d = ply:GetPos():DistToSqr(self.CenterPos)
-		if d < closestDist then
-			closestDist = d
-			closest = ply
-		end
+		if d < closestDist then closestDist = d closest = ply end
 	end
 	return closest
 end
@@ -359,7 +376,7 @@ end
 -- DIVE UPDATE
 -- ============================================================
 
-function ENT:UpdateDive(ct, dt)
+function ENT:UpdateDive(ct)
 	if self.DiveExploded then return end
 
 	if ct >= self.DiveNextTrack then
@@ -381,6 +398,7 @@ function ENT:UpdateDive(ct, dt)
 
 	self.DiveSpeedCurrent = Lerp(self.DiveSpeedLerp, self.DiveSpeedCurrent, self.DIVE_Speed)
 
+	local dt = FrameTime()
 	self.DiveWobblePhase  = self.DiveWobblePhase  + self.DiveWobbleSpeed  * dt
 	self.DiveWobblePhaseV = self.DiveWobblePhaseV + self.DiveWobbleSpeedV * dt
 
@@ -416,8 +434,6 @@ function ENT:UpdateDive(ct, dt)
 
 	if IsValid(self.PhysObj) then
 		self.PhysObj:SetVelocity(totalVel)
-	else
-		self:SetPos(nextPos)
 	end
 end
 
