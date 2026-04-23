@@ -6,20 +6,20 @@ include("shared.lua")
 --  AGM-158 JASSM -- SERVER
 -- ================================================================
 
-local ENGINE_LOOP_SOUND = "jet/luxor/external.wav"
+local PASS_SOUNDS = {
+	"ambient/wind/wind_generic_loop1.wav",
+	"ambient/wind/wind_generic_loop2.wav",
+}
+
+local ENGINE_LOOP_SOUND = "^sound/tomahawk/high.wav"
 
 ENT.WeaponWindow       = 8
-ENT.FadeDuration       = 2.0
 ENT.DIVE_Speed         = 2200
 ENT.DIVE_TrackInterval = 0.1
 
 -- ============================================================
--- HELPERS
+-- DEBUG
 -- ============================================================
-
-function ENT:StopAllSounds()
-	if self.EngineLoop then self.EngineLoop:Stop() self.EngineLoop = nil end
-end
 
 function ENT:Debug(msg)
 	print("[Bombin JASSM] " .. tostring(msg))
@@ -58,8 +58,7 @@ function ENT:Initialize()
 	self.OrbitRadius = baseRadius * math.Rand(0.82, 1.18)
 	self.Speed       = baseSpeed  * math.Rand(0.85, 1.15)
 
-	self.OrbitDir = (math.random(0, 1) == 0) and 1 or -1
-
+	self.OrbitDir      = (math.random(0, 1) == 0) and 1 or -1
 	self.OrbitAngle    = math.Rand(0, math.pi * 2)
 	self.OrbitAngSpeed = (self.Speed / self.OrbitRadius) * self.OrbitDir
 
@@ -75,19 +74,15 @@ function ENT:Initialize()
 		self:Debug("Spawn position out of world") self:Remove() return
 	end
 
-	self:SetModel("models/sw/avia/agm158/sw_rocket_agm158_v3.mdl")
+	self:SetModel("models/sw/usa/missiles/agm/agm158.mdl")
 	self:PhysicsInit(SOLID_VPHYSICS)
 	self:SetMoveType(MOVETYPE_VPHYSICS)
 	self:SetSolid(SOLID_VPHYSICS)
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
 
-	-- Bodygroup 0 submodel 1 = wings deployed
-	self:SetBodygroup(0, 1)
-
-	-- Start fully transparent, fade in via Think
-	self:SetRenderMode(RENDERMODE_TRANSALPHA)
-	self:SetColor(Color(255, 255, 255, 0))
+	-- Full opacity from the start, no fade
+	self:SetRenderMode(RENDERMODE_NORMAL)
 
 	self:SetNWInt("HP",    self.MaxHP)
 	self:SetNWInt("MaxHP", self.MaxHP)
@@ -129,11 +124,13 @@ function ENT:Initialize()
 
 	self.EngineLoop = CreateSound(self, ENGINE_LOOP_SOUND)
 	if self.EngineLoop then
-		self.EngineLoop:SetSoundLevel(85)
+		self.EngineLoop:SetSoundLevel(130)
 		self.EngineLoop:ChangePitch(100, 0)
-		self.EngineLoop:ChangeVolume(0.9, 0)
+		self.EngineLoop:ChangeVolume(1.0, 0.5)
 		self.EngineLoop:Play()
 	end
+
+	self.NextPassSound = CurTime() + math.Rand(5, 10)
 
 	self.CurrentWeapon   = nil
 	self.WeaponWindowEnd = 0
@@ -179,12 +176,12 @@ function ENT:OnTakeDamage(dmginfo)
 end
 
 -- ============================================================
--- THINK  (timer, fade, weapon window)
+-- THINK
 -- ============================================================
 
 function ENT:Think()
 	if not self.DieTime or not self.SpawnTime then
-		self:NextThink(CurTime() + 0.05)
+		self:NextThink(CurTime() + 0.1)
 		return true
 	end
 
@@ -198,16 +195,13 @@ function ENT:Think()
 		self.PhysObj:Wake()
 	end
 
-	-- Alpha fade in / fade out
-	local age  = ct - self.SpawnTime
-	local left = self.DieTime - ct
-	local alpha = 255
-	if age < self.FadeDuration then
-		alpha = math.Clamp(255 * (age / self.FadeDuration), 0, 255)
-	elseif left < self.FadeDuration then
-		alpha = math.Clamp(255 * (left / self.FadeDuration), 0, 255)
+	if ct >= self.NextPassSound then
+		sound.Play(
+			table.Random(PASS_SOUNDS),
+			self:GetPos(), 90, math.random(96, 104), 0.7
+		)
+		self.NextPassSound = ct + math.Rand(8, 16)
 	end
-	self:SetColor(Color(255, 255, 255, math.Round(alpha)))
 
 	if self.Diving then
 		self:UpdateDive(ct)
@@ -215,12 +209,12 @@ function ENT:Think()
 		self:HandleWeaponWindow(ct)
 	end
 
-	self:NextThink(ct + 0.05)
+	self:NextThink(ct)
 	return true
 end
 
 -- ============================================================
--- ORBIT FLIGHT  (runs inside physics simulation, like learn-dive)
+-- ORBIT FLIGHT (PhysicsUpdate — matches learn-dive / tomahawk)
 -- ============================================================
 
 function ENT:PhysicsUpdate(phys)
@@ -275,9 +269,15 @@ function ENT:PhysicsUpdate(phys)
 	self.PrevYaw       = self.ang.y
 	local targetRoll   = math.Clamp(rawYawDelta * -25, -30, 30)
 	self.SmoothedRoll  = Lerp(rawYawDelta ~= 0 and 0.15 or 0.05, self.SmoothedRoll, targetRoll)
-	self.SmoothedPitch = Lerp(0.04, self.SmoothedPitch, 0)
-	self.ang.p         = self.SmoothedPitch
-	self.ang.r         = self.SmoothedRoll
+
+	local physVel      = IsValid(phys) and phys:GetVelocity() or Vector(0,0,0)
+	local forwardSpeed = physVel:Dot(self:GetForward())
+	local speedRatio   = math.Clamp(forwardSpeed / self.Speed, 0, 1)
+	local targetPitch  = math.Clamp(speedRatio * 10, -15, 15)
+	self.SmoothedPitch = Lerp(0.04, self.SmoothedPitch, targetPitch)
+
+	self.ang.p = self.SmoothedPitch
+	self.ang.r = self.SmoothedRoll
 	self:SetAngles(self.ang)
 
 	if IsValid(phys) then
@@ -299,7 +299,7 @@ function ENT:GetPrimaryTarget()
 	for _, ply in ipairs(player.GetAll()) do
 		if not IsValid(ply) or not ply:Alive() then continue end
 		local d = ply:GetPos():DistToSqr(self.CenterPos)
-		if d < closestDist then closestDist = d closest = ply end
+		if d < closestDist then closestDist = d; closest = ply end
 	end
 	return closest
 end
@@ -319,7 +319,13 @@ end
 
 function ENT:PickNewWeapon(ct)
 	local roll = math.random(1, 3)
-	self.CurrentWeapon   = (roll == 3) and "dive" or ("peaceful_" .. roll)
+	if roll == 1 then
+		self.CurrentWeapon = "peaceful_1"
+	elseif roll == 2 then
+		self.CurrentWeapon = "peaceful_2"
+	else
+		self.CurrentWeapon = "dive"
+	end
 	self.WeaponWindowEnd = ct + self.WeaponWindow
 	self:Debug("Behavior slot: " .. self.CurrentWeapon)
 end
@@ -493,5 +499,5 @@ end
 -- ============================================================
 
 function ENT:OnRemove()
-	self:StopAllSounds()
+	if self.EngineLoop then self.EngineLoop:Stop() end
 end
