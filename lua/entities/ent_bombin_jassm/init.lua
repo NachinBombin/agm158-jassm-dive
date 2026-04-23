@@ -81,10 +81,9 @@ function ENT:Initialize()
 	self:SetSolid(SOLID_VPHYSICS)
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
-	self:SetBodygroup(0, 1)
 
-	self:SetRenderMode(RENDERMODE_TRANSALPHA)
-	self:SetColor(Color(255, 255, 255, 0))
+	-- Bodygroup 0, submodel 1 = wings deployed
+	self:SetBodygroup(0, 1)
 
 	self:SetNWInt("HP",    self.MaxHP)
 	self:SetNWInt("MaxHP", self.MaxHP)
@@ -124,7 +123,6 @@ function ENT:Initialize()
 		self.PhysObj:EnableGravity(false)
 	end
 
-	-- AN-71 pattern: entity-attached, 3D positional
 	self.EngineLoop = CreateSound(self, ENGINE_LOOP_SOUND)
 	if self.EngineLoop then
 		self.EngineLoop:SetSoundLevel(85)
@@ -133,11 +131,9 @@ function ENT:Initialize()
 		self.EngineLoop:Play()
 	end
 
-	-- Weapon state
 	self.CurrentWeapon   = nil
 	self.WeaponWindowEnd = 0
 
-	-- Dive state
 	self.Diving           = false
 	self.DiveTarget       = nil
 	self.DiveTargetPos    = nil
@@ -197,16 +193,6 @@ function ENT:Think()
 	if IsValid(self.PhysObj) and self.PhysObj:IsAsleep() then
 		self.PhysObj:Wake()
 	end
-
-	local age  = ct - self.SpawnTime
-	local left = self.DieTime - ct
-	local alpha = 255
-	if age < self.FadeDuration then
-		alpha = math.Clamp(255 * (age / self.FadeDuration), 0, 255)
-	elseif left < self.FadeDuration then
-		alpha = math.Clamp(255 * (left / self.FadeDuration), 0, 255)
-	end
-	self:SetColor(Color(255, 255, 255, math.Round(alpha)))
 
 	local dt = 0.05
 	if self.Diving then
