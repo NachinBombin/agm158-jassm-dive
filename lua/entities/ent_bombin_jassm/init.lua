@@ -9,7 +9,6 @@ include("shared.lua")
 local ENGINE_LOOP_SOUND = "jet/luxor/external.wav"
 
 ENT.WeaponWindow  = 8
-ENT.FadeDuration  = 2.0
 
 ENT.DIVE_Speed         = 2200
 ENT.DIVE_TrackInterval = 0.1
@@ -87,21 +86,20 @@ function ENT:Initialize()
     end
 
     self:SetModel("models/sw/avia/agm158/sw_rocket_agm158_v3.mdl")
-    -- MOVETYPE_NOCLIP: we drive position entirely via SetPos/SetVelocity in Think.
-    -- No PhysicsInit needed — avoids the VPHYSICS vs SetPos fight that froze movement.
     self:SetMoveType(MOVETYPE_NOCLIP)
     self:SetSolid(SOLID_BBOX)
     self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
     self:SetPos(spawnPos)
 
-    -- Start fully visible. Fade-out only near end-of-life.
-    self:SetRenderMode(RENDERMODE_NORMAL)
+    -- RENDERMODE_TRANSALPHA at full alpha is required for many workshop models
+    -- to render correctly. No fade logic — always fully visible.
+    self:SetRenderMode(RENDERMODE_TRANSALPHA)
     self:SetColor(Color(255, 255, 255, 255))
 
     self:SetNWInt("HP",    self.MaxHP)
     self:SetNWInt("MaxHP", self.MaxHP)
 
-    local tangent = Vector(-entryOffset.y, entryOffset.x, 0) * self.OrbitDir
+    local tangent  = Vector(-entryOffset.y, entryOffset.x, 0) * self.OrbitDir
     local startAng = tangent:Angle()
     self:SetAngles(Angle(0, startAng.y, 0))
     self.ang = self:GetAngles()
@@ -144,12 +142,12 @@ function ENT:Initialize()
     self.WeaponWindowEnd = 0
 
     -- Dive state
-    self.Diving        = false
-    self.DiveTarget    = nil
-    self.DiveTargetPos = nil
-    self.DiveNextTrack = 0
-    self.DiveExploded  = false
-    self.DiveAimOffset = Vector(0,0,0)
+    self.Diving           = false
+    self.DiveTarget       = nil
+    self.DiveTargetPos    = nil
+    self.DiveNextTrack    = 0
+    self.DiveExploded     = false
+    self.DiveAimOffset    = Vector(0,0,0)
 
     self.DiveWobblePhase  = 0
     self.DiveWobbleAmp    = 180
@@ -158,9 +156,9 @@ function ENT:Initialize()
     self.DiveWobbleAmpV   = 130
     self.DiveWobbleSpeedV = 3.1
 
-    self.DiveSpeedMin     = self.DIVE_Speed * 0.55
-    self.DiveSpeedCurrent = self.DIVE_Speed * 0.55
-    self.DiveSpeedLerp    = 0.018
+    self.DiveSpeedMin       = self.DIVE_Speed * 0.55
+    self.DiveSpeedCurrent   = self.DIVE_Speed * 0.55
+    self.DiveSpeedLerp      = 0.018
     self.DivePitchTelegraph = 0
 
     self:Debug("Spawned at " .. tostring(spawnPos) .. " OrbitDir=" .. self.OrbitDir)
@@ -185,11 +183,11 @@ function ENT:OnTakeDamage(dmginfo)
 end
 
 -- ============================================================
--- THINK  — drives all movement (no PhysicsUpdate needed)
+-- THINK
 -- ============================================================
 
 function ENT:Think()
-    if not self.DieTime or not self.SpawnTime then
+    if not self.DieTime then
         self:NextThink(CurTime() + 0.05)
         return true
     end
@@ -197,17 +195,7 @@ function ENT:Think()
     local ct = CurTime()
     if ct >= self.DieTime then self:Remove() return end
 
-    local dt = 0.05  -- fixed step matching NextThink interval below
-
-    -- Fade out only in last 2 seconds
-    local left = self.DieTime - ct
-    if left < self.FadeDuration then
-        local alpha = math.Clamp(255 * (left / self.FadeDuration), 0, 255)
-        self:SetColor(Color(255, 255, 255, math.Round(alpha)))
-        if left < self.FadeDuration then
-            self:SetRenderMode(RENDERMODE_TRANSALPHA)
-        end
-    end
+    local dt = 0.05
 
     if self.Diving then
         self:UpdateDive(ct, dt)
@@ -221,7 +209,7 @@ function ENT:Think()
 end
 
 -- ============================================================
--- ORBIT FLIGHT  (MOVETYPE_NOCLIP — SetPos drives position)
+-- ORBIT FLIGHT
 -- ============================================================
 
 function ENT:UpdateOrbit(ct, dt)
@@ -229,7 +217,6 @@ function ENT:UpdateOrbit(ct, dt)
 
     local pos = self:GetPos()
 
-    -- Wander center
     self.WanderPhaseX = self.WanderPhaseX + self.WanderRateX
     self.WanderPhaseY = self.WanderPhaseY + self.WanderRateY
     self.CenterPos = Vector(
@@ -238,26 +225,22 @@ function ENT:UpdateOrbit(ct, dt)
         self.BaseCenterPos.z
     )
 
-    -- Advance orbit angle
     self.OrbitAngSpeed = (self.Speed / self.OrbitRadius) * self.OrbitDir
     self.OrbitAngle    = self.OrbitAngle + self.OrbitAngSpeed * dt
 
     local desiredX = self.CenterPos.x + math.cos(self.OrbitAngle) * self.OrbitRadius
     local desiredY = self.CenterPos.y + math.sin(self.OrbitAngle) * self.OrbitRadius
 
-    -- Yaw correction toward orbit tangent
     local tangentYaw    = math.deg(self.OrbitAngle) + 90 * self.OrbitDir
     local yawError      = math.NormalizeAngle(tangentYaw - self.ang.y)
     local yawCorrection = math.Clamp(yawError * 0.08, -0.6, 0.6)
     self.ang            = self.ang + Angle(0, yawCorrection, 0)
 
-    -- Altitude jitter
     self.JitterPhase  = self.JitterPhase  + self.JitterRate1
     self.JitterPhase2 = self.JitterPhase2 + self.JitterRate2
     local jitter = math.sin(self.JitterPhase)  * self.JitterAmp1
                  + math.sin(self.JitterPhase2) * self.JitterAmp2
 
-    -- Altitude drift
     if ct >= self.AltDriftNextPick then
         self.AltDriftTarget   = self.sky + math.Rand(-self.AltDriftRange, self.AltDriftRange)
         self.AltDriftNextPick = ct + math.Rand(10, 25)
@@ -265,15 +248,10 @@ function ENT:UpdateOrbit(ct, dt)
     self.AltDriftCurrent = Lerp(self.AltDriftLerp, self.AltDriftCurrent, self.AltDriftTarget)
     local liveAlt = self.AltDriftCurrent + jitter
 
-    -- XY correction: lerp toward orbit ring
     local newX = Lerp(0.08, pos.x, desiredX)
     local newY = Lerp(0.08, pos.y, desiredY)
+    self:SetPos(Vector(newX, newY, liveAlt))
 
-    -- Apply position — MOVETYPE_NOCLIP respects SetPos cleanly
-    local newPos = Vector(newX, newY, liveAlt)
-    self:SetPos(newPos)
-
-    -- Rotation
     local rawYawDelta  = math.NormalizeAngle(self.ang.y - (self.PrevYaw or self.ang.y))
     self.PrevYaw       = self.ang.y
     local targetRoll   = math.Clamp(rawYawDelta * -25, -30, 30)
@@ -363,7 +341,6 @@ function ENT:InitDive(ct)
     self.DiveAimOffset      = Vector(math.Rand(-400,400), math.Rand(-400,400), 0)
 
     self:SetCollisionGroup(COLLISION_GROUP_NONE)
-
     self:Debug("DIVE: committed — aim offset " .. tostring(self.DiveAimOffset))
 end
 
@@ -384,18 +361,18 @@ function ENT:UpdateDive(ct, dt)
 
     if not self.DiveTargetPos then self:Remove() return end
 
-    local myPos  = self:GetPos()
-    local dir    = (self.DiveTargetPos + self.DiveAimOffset) - myPos
-    local dist   = dir:Length()
+    local myPos = self:GetPos()
+    local dir   = (self.DiveTargetPos + self.DiveAimOffset) - myPos
+    local dist  = dir:Length()
 
     if dist < 120 then self:DiveExplode(myPos) return end
     dir:Normalize()
 
     self.DiveSpeedCurrent = Lerp(self.DiveSpeedLerp, self.DiveSpeedCurrent, self.DIVE_Speed)
 
-    -- Wobble
     self.DiveWobblePhase  = self.DiveWobblePhase  + self.DiveWobbleSpeed  * dt
     self.DiveWobblePhaseV = self.DiveWobblePhaseV + self.DiveWobbleSpeedV * dt
+
     local flatRight = Vector(-dir.y, dir.x, 0)
     if flatRight:LengthSqr() < 0.01 then flatRight = Vector(1,0,0) end
     flatRight:Normalize()
@@ -403,13 +380,13 @@ function ENT:UpdateDive(ct, dt)
     local upPerp  = worldUp - dir * dir:Dot(worldUp)
     if upPerp:LengthSqr() < 0.01 then upPerp = Vector(0,1,0) end
     upPerp:Normalize()
+
     local wobbleScale = math.Clamp(dist / 400, 0, 1)
     local wobbleVel   = flatRight * math.sin(self.DiveWobblePhase)  * self.DiveWobbleAmp  * wobbleScale
                       + upPerp   * math.sin(self.DiveWobblePhaseV) * self.DiveWobbleAmpV * wobbleScale
 
     local totalVel = dir * self.DiveSpeedCurrent + wobbleVel
 
-    -- Face travel direction
     if totalVel:LengthSqr() > 0.01 then
         local faceAng = totalVel:GetNormalized():Angle()
         faceAng.r = 0
@@ -417,7 +394,6 @@ function ENT:UpdateDive(ct, dt)
         self.ang = faceAng
     end
 
-    -- Trace and move
     local nextPos = myPos + totalVel * dt
     local tr = util.TraceLine({
         start  = myPos,
@@ -445,11 +421,11 @@ function ENT:DiveExplode(pos)
         ed:SetScale(sc) ed:SetMagnitude(sc) ed:SetRadius(sc * 100)
         util.Effect(effect, ed, true, true)
     end
-    E("HelicopterMegaBomb", pos,               8)
-    E("500lb_air",          pos,               7)
-    E("500lb_air",          pos+Vector(0,0,80), 6)
-    E("500lb_air",          pos+Vector(0,0,160),5)
-    E("HelicopterMegaBomb", pos+Vector(0,0,20), 6)
+    E("HelicopterMegaBomb", pos,                8)
+    E("500lb_air",          pos,                7)
+    E("500lb_air",          pos+Vector(0,0,80),  6)
+    E("500lb_air",          pos+Vector(0,0,160), 5)
+    E("HelicopterMegaBomb", pos+Vector(0,0,20),  6)
 
     sound.Play("weapon_AWP.Single",               pos, 155, 52, 1.0)
     sound.Play("ambient/explosions/explode_8.wav", pos, 150, 78, 1.0)
