@@ -2,7 +2,9 @@ include("shared.lua")
 
 -- ================================================================
 -- AGM-158 JASSM -- CLIENT
--- 3D flame model, free-floating (no parent), repositioned every Draw.
+-- Missile body drawn via DrawModel().
+-- 3D flame prop (trail_f22) floated at the exhaust, created after
+-- a one-frame defer so a bad model path can never abort Initialize.
 -- ================================================================
 
 local FLAME_MODEL = "models/roycombat/shared/trail_f22.mdl"
@@ -10,21 +12,24 @@ local BACK_OFFSET = 55
 local FLAME_SCALE = 0.55
 
 function ENT:Initialize()
-	self:SetRenderBounds(Vector(-120, -120, -120), Vector(120, 120, 120))
-
-	self._flameProp = ClientsideModel(FLAME_MODEL)
-	if IsValid(self._flameProp) then
-		self._flameProp:SetPos(self:GetPos())
-		self._flameProp:SetAngles(self:GetAngles())
-		self._flameProp:SetModelScale(FLAME_SCALE, 0)
-		self._flameProp:SetNoDraw(false)
-	end
+	-- Defer flame prop creation by one frame.
+	-- If the model is missing this errors in the timer, not here,
+	-- so the entity Initialize always completes and DrawModel works.
+	timer.Simple(0, function()
+		if not IsValid(self) then return end
+		self._flameProp = ClientsideModel(FLAME_MODEL)
+		if IsValid(self._flameProp) then
+			self._flameProp:SetModelScale(FLAME_SCALE, 0)
+			self._flameProp:SetNoDraw(true) -- we manually call DrawModel in ENT:Draw
+		end
+	end)
 end
 
 function ENT:Draw()
-	self:SetupBones()
+	-- Always draw the missile body first.
 	self:DrawModel()
 
+	-- Draw flame prop if it loaded.
 	if not IsValid(self._flameProp) then return end
 
 	local exhaustPos = self:GetPos() + (-self:GetForward()) * BACK_OFFSET
