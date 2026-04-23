@@ -17,17 +17,9 @@ ENT.WeaponWindow       = 8
 ENT.DIVE_Speed         = 2200
 ENT.DIVE_TrackInterval = 0.1
 
--- ============================================================
--- DEBUG
--- ============================================================
-
 function ENT:Debug(msg)
 	print("[Bombin JASSM] " .. tostring(msg))
 end
-
--- ============================================================
--- INITIALIZE
--- ============================================================
 
 function ENT:Initialize()
 	self.CenterPos    = self:GetVar("CenterPos",    self:GetPos())
@@ -75,15 +67,14 @@ function ENT:Initialize()
 	end
 
 	self:SetModel("models/sw/usa/missiles/agm/agm158.mdl")
+	self:SetModelScale(1.6, 0)
 	self:PhysicsInit(SOLID_VPHYSICS)
 	self:SetMoveType(MOVETYPE_VPHYSICS)
 	self:SetSolid(SOLID_VPHYSICS)
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
 
-	-- Group 1 = wings (same index the SW base uses in InitLaunch)
 	self:SetBodygroup(1, 1)
-
 	self:SetRenderMode(RENDERMODE_NORMAL)
 
 	self:SetNWInt("HP",    self.MaxHP)
@@ -159,10 +150,6 @@ function ENT:Initialize()
 	self:Debug("Spawned at " .. tostring(spawnPos) .. " OrbitDir=" .. self.OrbitDir)
 end
 
--- ============================================================
--- DAMAGE
--- ============================================================
-
 function ENT:OnTakeDamage(dmginfo)
 	if self.DiveExploded then return end
 	if dmginfo:IsDamageType(DMG_CRUSH) then return end
@@ -176,10 +163,6 @@ function ENT:OnTakeDamage(dmginfo)
 		self:DiveExplode(self:GetPos())
 	end
 end
-
--- ============================================================
--- THINK
--- ============================================================
 
 function ENT:Think()
 	if not self.DieTime or not self.SpawnTime then
@@ -214,10 +197,6 @@ function ENT:Think()
 	self:NextThink(ct)
 	return true
 end
-
--- ============================================================
--- ORBIT FLIGHT
--- ============================================================
 
 function ENT:PhysicsUpdate(phys)
 	if not self.DieTime or not self.sky then return end
@@ -292,10 +271,6 @@ function ENT:PhysicsUpdate(phys)
 	end
 end
 
--- ============================================================
--- TARGET
--- ============================================================
-
 function ENT:GetPrimaryTarget()
 	local closest, closestDist = nil, math.huge
 	for _, ply in ipairs(player.GetAll()) do
@@ -305,10 +280,6 @@ function ENT:GetPrimaryTarget()
 	end
 	return closest
 end
-
--- ============================================================
--- WEAPON WINDOW
--- ============================================================
 
 function ENT:HandleWeaponWindow(ct)
 	if not self.CurrentWeapon or ct >= self.WeaponWindowEnd then
@@ -331,10 +302,6 @@ function ENT:PickNewWeapon(ct)
 	self.WeaponWindowEnd = ct + self.WeaponWindow
 	self:Debug("Behavior slot: " .. self.CurrentWeapon)
 end
-
--- ============================================================
--- DIVE INIT
--- ============================================================
 
 function ENT:InitDive(ct)
 	if self.Diving then return end
@@ -379,10 +346,6 @@ function ENT:InitDive(ct)
 
 	self:Debug("DIVE: committed -- aim offset " .. tostring(self.DiveAimOffset))
 end
-
--- ============================================================
--- DIVE UPDATE
--- ============================================================
 
 function ENT:UpdateDive(ct)
 	if self.DiveExploded then return end
@@ -445,10 +408,6 @@ function ENT:UpdateDive(ct)
 	end
 end
 
--- ============================================================
--- EXPLOSION
--- ============================================================
-
 function ENT:DiveExplode(pos)
 	if self.DiveExploded then return end
 	self.DiveExploded = true
@@ -474,10 +433,6 @@ function ENT:DiveExplode(pos)
 	self:Remove()
 end
 
--- ============================================================
--- GROUND FINDER
--- ============================================================
-
 function ENT:FindGround(centerPos)
 	local startPos   = Vector(centerPos.x, centerPos.y, centerPos.z + 64)
 	local endPos     = Vector(centerPos.x, centerPos.y, -16384)
@@ -495,10 +450,6 @@ function ENT:FindGround(centerPos)
 	end
 	return -1
 end
-
--- ============================================================
--- CLEANUP
--- ============================================================
 
 function ENT:OnRemove()
 	if self.EngineLoop then self.EngineLoop:Stop() end
