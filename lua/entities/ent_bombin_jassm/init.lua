@@ -81,12 +81,17 @@ function ENT:Initialize()
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
 
-	self:SetBodygroup(0, 1)
-
 	self:SetRenderMode(RENDERMODE_NORMAL)
 
 	self:SetNWInt("HP",    self.MaxHP)
 	self:SetNWInt("MaxHP", self.MaxHP)
+
+	-- Defer bodygroup so it applies after the entity is fully networked to clients
+	local ent = self
+	timer.Simple(0, function()
+		if not IsValid(ent) then return end
+		ent:SetBodygroup(0, 1)
+	end)
 
 	local tangent  = Vector(-entryOffset.y, entryOffset.x, 0) * self.OrbitDir
 	local startAng = tangent:Angle()
