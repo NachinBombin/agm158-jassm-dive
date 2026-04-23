@@ -12,6 +12,10 @@ local BACK_OFFSET = 55
 local FLAME_SCALE = 0.55
 
 function ENT:Initialize()
+	-- Apply bodygroup locally -- custom Draw() / DrawModel() bypasses
+	-- networked bodygroup state, so we must set it on the client too.
+	self:SetBodygroup(0, 1)
+
 	-- Defer flame prop creation by one frame.
 	-- If the model is missing this errors in the timer, not here,
 	-- so the entity Initialize always completes and DrawModel works.
