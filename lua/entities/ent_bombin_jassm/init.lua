@@ -11,7 +11,7 @@ local PASS_SOUNDS = {
 	"ambient/wind/wind_generic_loop2.wav",
 }
 
-local ENGINE_LOOP_SOUND = "^sound/tomahawk/high.wav"
+local ENGINE_LOOP_SOUND = "^jet/luxor/external.wav"
 
 ENT.WeaponWindow       = 8
 ENT.DIVE_Speed         = 2200
@@ -81,7 +81,8 @@ function ENT:Initialize()
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
 
-	-- Full opacity from the start, no fade
+	self:SetBodygroup(0, 1)
+
 	self:SetRenderMode(RENDERMODE_NORMAL)
 
 	self:SetNWInt("HP",    self.MaxHP)
@@ -214,7 +215,7 @@ function ENT:Think()
 end
 
 -- ============================================================
--- ORBIT FLIGHT (PhysicsUpdate — matches learn-dive / tomahawk)
+-- ORBIT FLIGHT
 -- ============================================================
 
 function ENT:PhysicsUpdate(phys)
