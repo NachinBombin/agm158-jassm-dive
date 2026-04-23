@@ -85,13 +85,11 @@ function ENT:Initialize()
 	end
 
 	self:SetModel("models/sw/avia/agm158/sw_rocket_agm158_v3.mdl")
+	self:SetBodygroup(0, 1)
 	self:SetMoveType(MOVETYPE_NOCLIP)
 	self:SetSolid(SOLID_BBOX)
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
 	self:SetPos(spawnPos)
-
-	self:SetRenderMode(RENDERMODE_TRANSALPHA)
-	self:SetColor(Color(255, 255, 255, 255))
 
 	self:SetNWInt("HP",    self.MaxHP)
 	self:SetNWInt("MaxHP", self.MaxHP)
@@ -421,15 +419,15 @@ function ENT:DiveExplode(pos)
 		ed:SetScale(sc) ed:SetMagnitude(sc) ed:SetRadius(sc * 100)
 		util.Effect(effect, ed, true, true)
 	end
-	E("HelicopterMegaBomb", pos,                    8)
-	E("500lb_air",          pos,                    7)
-	E("500lb_air",          pos + Vector(0,0,80),   6)
-	E("500lb_air",          pos + Vector(0,0,160),  5)
-	E("HelicopterMegaBomb", pos + Vector(0,0,20),   6)
+	E("HelicopterMegaBomb", pos,                   8)
+	E("500lb_air",          pos,                   7)
+	E("500lb_air",          pos + Vector(0,0,80),  6)
+	E("500lb_air",          pos + Vector(0,0,160), 5)
+	E("HelicopterMegaBomb", pos + Vector(0,0,20),  6)
 
-	sound.Play("weapon_AWP.Single",               pos,                  155, 52,  1.0)
-	sound.Play("ambient/explosions/explode_8.wav", pos,                  150, 78,  1.0)
-	sound.Play("ambient/explosions/explode_8.wav", pos+Vector(0,0,40),  145, 85,  0.9)
+	sound.Play("weapon_AWP.Single",               pos,               155, 52, 1.0)
+	sound.Play("ambient/explosions/explode_8.wav", pos,               150, 78, 1.0)
+	sound.Play("ambient/explosions/explode_8.wav", pos+Vector(0,0,40), 145, 85, 0.9)
 
 	util.BlastDamage(self, self, pos, self.DIVE_ExplosionRadius, self.DIVE_ExplosionDamage)
 	self:Remove()
