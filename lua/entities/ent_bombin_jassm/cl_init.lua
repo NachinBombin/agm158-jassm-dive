@@ -8,9 +8,19 @@ local FLAME_MODEL = "models/roycombat/shared/trail_f22.mdl"
 local BACK_OFFSET = 55
 local FLAME_SCALE = 0.55
 
+local IGNITION_SOUNDS = {
+	"jassm/missile_1.wav",
+	"jassm/missile_2.wav",
+	"jassm/missile_3.wav",
+	"jassm/missile_4.wav",
+}
+
 function ENT:Initialize()
 	self:SetModelScale(1.6, 0)
-	self:SetBodygroup(1, 1)
+	-- bodygroup intentionally NOT set here -- server controls it via SetBodygroup:
+	-- 0 = wings folded (freefall), 1 = wings deployed (post-ignition)
+
+	self._engineWasOn = false
 
 	timer.Simple(0, function()
 		if not IsValid(self) then return end
@@ -25,8 +35,16 @@ end
 function ENT:Draw()
 	self:DrawModel()
 
-	-- Flame and dynamic light only visible after engine ignition
-	if not self:GetNWBool("EngineOn", false) then return end
+	local engineOn = self:GetNWBool("EngineOn", false)
+
+	-- Play ignition sound exactly once on the client when engine flips on
+	if engineOn and not self._engineWasOn then
+		self._engineWasOn = true
+		local snd = IGNITION_SOUNDS[ math.random(1, #IGNITION_SOUNDS) ]
+		sound.Play(snd, self:GetPos(), 110, math.random(95, 105), 1.0)
+	end
+
+	if not engineOn then return end
 
 	if not IsValid(self._flameProp) then return end
 
