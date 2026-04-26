@@ -2,6 +2,8 @@
 --  ENT_BOMBIN_JASSM_CHUTE  (client)
 -- ================================================================
 
+include( "shared.lua" )
+
 local CHUTE_MODEL = "models/v92/parachutez/flying.mdl"
 
 function ENT:Initialize()
