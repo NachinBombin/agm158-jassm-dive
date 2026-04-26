@@ -9,12 +9,14 @@ AddCSLuaFile( "shared.lua" )
 include( "shared.lua" )
 
 local CHUTE_MODEL   = "models/v92/parachutez/flying.mdl"
+local CHUTE_SCALE   = 2.0
 local ABOVE_OFFSET  = Vector( 0, 0, 105 )
 local SWAY_AMP      = 2.5
 local SWAY_RATE     = 1.2
 
 function ENT:Initialize()
 	self:SetModel( CHUTE_MODEL )
+	self:SetModelScale( CHUTE_SCALE, 0 )
 	self:SetMoveType( MOVETYPE_NONE )
 	self:SetSolid( SOLID_NONE )
 	self:SetCollisionGroup( COLLISION_GROUP_WORLD )
@@ -33,13 +35,11 @@ function ENT:Think()
 		return
 	end
 
-	-- Engine ignited: detach and fall away
 	if missile:GetNWBool( "EngineOn", false ) then
 		self:Detach()
 		return
 	end
 
-	-- Follow missile position every tick
 	self.SwayClock = self.SwayClock + SWAY_RATE * FrameTime()
 	local sway = math.sin( self.SwayClock ) * SWAY_AMP
 
@@ -62,6 +62,7 @@ function ENT:Detach()
 		abandon:SetAngles( ang )
 		abandon:Spawn()
 		abandon:Activate()
+		abandon:SetModelScale( CHUTE_SCALE, 0 )
 
 		local phys = abandon:GetPhysicsObject()
 		if IsValid( phys ) then
