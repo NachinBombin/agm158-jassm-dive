@@ -51,7 +51,6 @@ function ENT:Initialize()
 	if ground == -1 then self:Debug("FindGround failed") self:Remove() return end
 
 	local altVariance = self.SkyHeightAdd * 0.25
-	-- self.sky = the orbit/ignition altitude (unchanged from original)
 	self.sky = ground + self.SkyHeightAdd + math.Rand(-altVariance, altVariance)
 
 	self.DieTime   = CurTime() + self.Lifetime
@@ -69,10 +68,7 @@ function ENT:Initialize()
 	local entryRad    = self.OrbitAngle
 	local entryOffset = Vector(math.cos(entryRad), math.sin(entryRad), 0)
 
-	-- Orbit position (XY) -- same as before
 	local orbitXY = self.CenterPos + entryOffset * (self.OrbitRadius * 1.05)
-
-	-- Actual spawn position: 900 units ABOVE orbit altitude
 	local spawnPos = Vector(orbitXY.x, orbitXY.y, self.sky + FREEFALL_DROP)
 
 	if not util.IsInWorld(spawnPos) then
@@ -84,11 +80,10 @@ function ENT:Initialize()
 
 	self:SetModel("models/sw/usa/missiles/agm/agm158.mdl")
 	self:SetModelScale(1.6, 0)
-	self:SetBodygroup(1, 1)
+	self:SetBodygroup(1, 0)   -- wings FOLDED during freefall
 	self:SetRenderMode(RENDERMODE_NORMAL)
 	self:SetPos(spawnPos)
 
-	-- MOVETYPE_FLYGRAVITY: clean gravity, no PhysicsUpdate during freefall
 	self:SetMoveType(MOVETYPE_FLYGRAVITY)
 	self:SetSolid(SOLID_BBOX)
 	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
@@ -127,7 +122,7 @@ function ENT:Initialize()
 	self.WanderRateX   = math.Rand(0.004, 0.010)
 	self.WanderRateY   = math.Rand(0.003, 0.009)
 
-	self.PhysObj = nil  -- not used during freefall
+	self.PhysObj = nil
 
 	self.EngineLoop    = nil
 	self.NextPassSound = CurTime() + math.Rand(5, 10)
@@ -161,10 +156,9 @@ function ENT:Initialize()
 	self.ExplodedAlready = false
 
 	self.EngineIgnited = false
-	-- No timer-based ignition: ignition triggers when missile reaches self.sky
 	self.ChuteEnt      = nil
 
-	-- Spawn chute immediately at spawn position (missile is at spawnPos right now)
+	-- Spawn chute immediately (missile is already at spawnPos)
 	local chute = ents.Create("ent_bombin_jassm_chute")
 	if IsValid(chute) then
 		chute:SetOwner(self)
@@ -186,6 +180,9 @@ function ENT:IgniteEngine()
 	if self.EngineIgnited then return end
 	self.EngineIgnited = true
 	self:SetNWBool("EngineOn", true)
+
+	-- Deploy wings
+	self:SetBodygroup(1, 1)
 
 	local pos = self:GetPos()
 
@@ -216,7 +213,6 @@ function ENT:IgniteEngine()
 	sound.Play("ambient/fire/gas_burst1.wav",       pos, 100, math.random(90, 110), 1.0)
 	sound.Play("ambient/fire/fire_large_loop1.wav", pos, 85,  130,                  0.6)
 
-	-- Start engine loop
 	self.EngineLoop = CreateSound(self, ENGINE_LOOP_SOUND)
 	if self.EngineLoop then
 		self.EngineLoop:SetSoundLevel(130)
@@ -225,7 +221,7 @@ function ENT:IgniteEngine()
 		self.EngineLoop:Play()
 	end
 
-	self:Debug("Engine ignited at altitude " .. math.Round(pos.z))
+	self:Debug("Engine ignited -- wings deployed -- orbit begins")
 end
 
 -- ============================================================
@@ -361,12 +357,10 @@ function ENT:Think()
 	if not self.EngineIgnited then
 		local vel = self:GetVelocity()
 
-		-- Cap terminal velocity
 		if vel.z < -FREEFALL_MAX_FALL then
 			self:SetVelocity(Vector(vel.x, vel.y, -FREEFALL_MAX_FALL))
 		end
 
-		-- Tilt nose gently downward
 		local ang = self:GetAngles()
 		self:SetAngles(Angle(
 			Lerp(0.08, ang.p, -15),
@@ -374,17 +368,15 @@ function ENT:Think()
 			Lerp(0.08, ang.r, 0)
 		))
 
-		-- Ignite when missile has fallen to orbit altitude
 		if self:GetPos().z <= self.sky then
 			self:IgniteEngine()
-			-- Fall through: orbit begins this same tick
 		else
 			self:NextThink(ct + 0.05)
 			return true
 		end
 	end
 
-	-- ---- Post-ignition: vphysics safety ----
+	-- ---- Post-ignition ----
 	if not IsValid(self.PhysObj) then
 		self.PhysObj = self:GetPhysicsObject()
 	end
