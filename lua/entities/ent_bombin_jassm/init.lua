@@ -20,6 +20,31 @@ ENT.WeaponWindow       = 8
 ENT.DIVE_Speed         = 2200
 ENT.DIVE_TrackInterval = 0.1
 
+-- ============================================================
+-- NET STRINGS
+-- ============================================================
+util.AddNetworkString( "bombin_jassm_damage_tier" )
+
+-- ============================================================
+-- DAMAGE TIER HELPERS
+-- ============================================================
+
+local function CalcTier( hp, maxHP )
+	local frac = hp / maxHP
+	if frac > 0.66 then return 0
+	elseif frac > 0.33 then return 1
+	elseif frac > 0 then return 2
+	else return 3
+	end
+end
+
+local function BroadcastTier( ent, tier )
+	net.Start( "bombin_jassm_damage_tier" )
+		net.WriteUInt( ent:EntIndex(), 16 )
+		net.WriteUInt( tier, 2 )
+	net.Broadcast()
+end
+
 function ENT:Debug(msg)
 	print("[Bombin JASSM] " .. tostring(msg))
 end
@@ -37,7 +62,8 @@ function ENT:Initialize()
 	self.DIVE_ExplosionDamage = self:GetVar("DIVE_ExplosionDamage", 1200)
 	self.DIVE_ExplosionRadius = self:GetVar("DIVE_ExplosionRadius", 1200)
 
-	self.MaxHP = 200
+	self.MaxHP    = 200
+	self.DamageTier = 0
 
 	if self.CallDir:LengthSqr() <= 1 then self.CallDir = Vector(1,0,0) end
 	self.CallDir.z = 0
@@ -218,6 +244,9 @@ function ENT:SetDestroyed()
 	self:SetNWBool("Destroyed", true)
 	self.DestroyedTime = CurTime()
 
+	-- Broadcast final tier (3 = critical/destroyed) for client FX
+	BroadcastTier( self, 3 )
+
 	if IsValid(self.PhysObj) then
 		local existing = self.PhysObj:GetAngleVelocity()
 		self.TumbleAngVel = existing + Vector(
@@ -259,6 +288,13 @@ function ENT:OnTakeDamage(dmginfo)
 	local hp = self:GetNWInt("HP", self.MaxHP or 200)
 	hp = hp - dmginfo:GetDamage()
 	self:SetNWInt("HP", hp)
+
+	-- Update damage tier and broadcast to clients when it changes
+	local tier = CalcTier( hp, self.MaxHP )
+	if tier ~= self.DamageTier then
+		self.DamageTier = tier
+		BroadcastTier( self, tier )
+	end
 
 	if hp <= 0 and not self:IsDestroyed() then
 		self:Debug("Shot down!")
