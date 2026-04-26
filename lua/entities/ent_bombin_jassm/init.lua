@@ -17,9 +17,8 @@ local GRAVITY_MULT       = 1.5
 local SHARD_LIFE         = 8
 
 -- Freefall tuning
-local FREEFALL_DURATION  = 4.5    -- seconds before engine ignites
-local FREEFALL_MAX_SPEED = 320    -- maximum downward velocity (u/s) while chute is open
-local FREEFALL_DRAG_MASS = 6000   -- upward impulse per frame to cap speed (tweak if needed)
+local FREEFALL_DURATION  = 4.5   -- seconds before engine ignites
+local FREEFALL_MAX_FALL  = 320   -- terminal velocity cap (u/s downward)
 
 ENT.WeaponWindow       = 8
 ENT.DIVE_Speed         = 2200
@@ -80,18 +79,19 @@ function ENT:Initialize()
 
 	self:SetModel("models/sw/usa/missiles/agm/agm158.mdl")
 	self:SetModelScale(1.6, 0)
-	self:PhysicsInit(SOLID_VPHYSICS)
-	self:SetMoveType(MOVETYPE_VPHYSICS)
-	self:SetSolid(SOLID_VPHYSICS)
-	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
-	self:SetPos(spawnPos)
 	self:SetBodygroup(1, 1)
 	self:SetRenderMode(RENDERMODE_NORMAL)
+	self:SetPos(spawnPos)
 
-	self:SetNWInt("HP",       self.MaxHP)
-	self:SetNWInt("MaxHP",    self.MaxHP)
-	self:SetNWBool("Destroyed",  false)
-	self:SetNWBool("EngineOn",   false)   -- flame hidden on client until ignition
+	-- ---- FREEFALL movetype: simple gravity, no vphysics fighting ----
+	self:SetMoveType(MOVETYPE_FLYGRAVITY)
+	self:SetSolid(SOLID_BBOX)
+	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
+
+	self:SetNWInt("HP",         self.MaxHP)
+	self:SetNWInt("MaxHP",      self.MaxHP)
+	self:SetNWBool("Destroyed", false)
+	self:SetNWBool("EngineOn",  false)
 
 	local tangent  = Vector(-entryOffset.y, entryOffset.x, 0) * self.OrbitDir
 	local startAng = tangent:Angle()
@@ -122,16 +122,10 @@ function ENT:Initialize()
 	self.WanderRateX   = math.Rand(0.004, 0.010)
 	self.WanderRateY   = math.Rand(0.003, 0.009)
 
-	self.PhysObj = self:GetPhysicsObject()
-	if IsValid(self.PhysObj) then
-		self.PhysObj:Wake()
-		-- Gravity ON during freefall; disabled again at IgniteEngine
-		self.PhysObj:EnableGravity(true)
-	end
+	-- PhysObj not used during freefall (MOVETYPE_FLYGRAVITY)
+	self.PhysObj = nil
 
-	-- Engine sound intentionally NOT started here
 	self.EngineLoop = nil
-
 	self.NextPassSound = CurTime() + math.Rand(5, 10)
 
 	self.CurrentWeapon   = nil
@@ -156,27 +150,32 @@ function ENT:Initialize()
 	self.DiveSpeedLerp      = 0.018
 	self.DivePitchTelegraph = 0
 
-	-- Death tumble state
 	self.Destroyed       = false
 	self.DestroyedTime   = nil
 	self.TumbleAngVel    = Vector(0,0,0)
 	self.ExplodeTimer    = nil
 	self.ExplodedAlready = false
 
-	-- ---- Freefall state ----
 	self.EngineIgnited    = false
 	self.EngineIgniteTime = CurTime() + FREEFALL_DURATION
+	self.ChuteEnt         = nil
 
-	-- Spawn the parachute entity above us
-	local chute = ents.Create("ent_bombin_jassm_chute")
-	if IsValid(chute) then
-		chute:SetOwner(self)
-		chute:SetPos(spawnPos + Vector(0, 0, 105))
-		chute:SetAngles(Angle(0, startAng.y, 0))
-		chute:Spawn()
-		chute:Activate()
-		self.ChuteEnt = chute
-	end
+	-- Spawn chute one tick later so NWBool "EngineOn"=false is networked first
+	local missileRef = self
+	local chuteSpawnPos = spawnPos
+	local chuteAng      = Angle(0, startAng.y, 0)
+	timer.Simple(0, function()
+		if not IsValid(missileRef) then return end
+		local chute = ents.Create("ent_bombin_jassm_chute")
+		if IsValid(chute) then
+			chute:SetOwner(missileRef)
+			chute:SetPos(chuteSpawnPos + Vector(0, 0, 105))
+			chute:SetAngles(chuteAng)
+			chute:Spawn()
+			chute:Activate()
+			missileRef.ChuteEnt = chute
+		end
+	end)
 
 	self:Debug("Spawned (freefall) at " .. tostring(spawnPos) .. " ignite in " .. FREEFALL_DURATION .. "s")
 end
@@ -190,14 +189,35 @@ function ENT:IgniteEngine()
 	self.EngineIgnited = true
 	self:SetNWBool("EngineOn", true)
 
-	-- Kill gravity, hand control back to orbit logic
+	local pos = self:GetPos()
+
+	-- Switch to vphysics for orbit control
+	self:PhysicsInit(SOLID_VPHYSICS)
+	self:SetMoveType(MOVETYPE_VPHYSICS)
+	self:SetSolid(SOLID_VPHYSICS)
+	self:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE_DEBRIS)
+
+	self.PhysObj = self:GetPhysicsObject()
 	if IsValid(self.PhysObj) then
+		self.PhysObj:Wake()
 		self.PhysObj:EnableGravity(false)
-		-- Give a small forward kick so orbit takes over smoothly
+		-- Kick forward into orbit
 		local fwd = self:GetForward()
 		fwd.z = 0
+		fwd:Normalize()
 		self.PhysObj:SetVelocity(fwd * self.Speed)
 	end
+
+	-- Ignition visual flash (visual only, no damage)
+	local ed = EffectData()
+	ed:SetOrigin(pos + self:GetForward() * -55)  -- exhaust position
+	ed:SetScale(2)
+	ed:SetMagnitude(2)
+	ed:SetRadius(200)
+	util.Effect("HelicopterMegaBomb", ed, true, true)
+
+	sound.Play("ambient/fire/gas_burst1.wav", pos, 100, math.random(90, 110), 1.0)
+	sound.Play("ambient/fire/fire_large_loop1.wav", pos, 85, 130, 0.6)
 
 	-- Start engine loop
 	self.EngineLoop = CreateSound(self, ENGINE_LOOP_SOUND)
@@ -207,8 +227,6 @@ function ENT:IgniteEngine()
 		self.EngineLoop:ChangeVolume(1.0, 0.5)
 		self.EngineLoop:Play()
 	end
-
-	-- Chute entity will self-detach on its next Think() because EngineOn is now true
 
 	self:Debug("Engine ignited -- orbit begins")
 end
@@ -267,7 +285,6 @@ function ENT:SetDestroyed()
 	self:SetNWBool("Destroyed", true)
 	self.DestroyedTime = CurTime()
 
-	-- Force-remove the chute on destruction
 	if IsValid(self.ChuteEnt) then
 		self.ChuteEnt:Remove()
 		self.ChuteEnt = nil
@@ -334,13 +351,6 @@ function ENT:Think()
 	local ct = CurTime()
 	if ct >= self.DieTime then self:Remove() return end
 
-	if not IsValid(self.PhysObj) then
-		self.PhysObj = self:GetPhysicsObject()
-	end
-	if IsValid(self.PhysObj) and self.PhysObj:IsAsleep() then
-		self.PhysObj:Wake()
-	end
-
 	if self:IsDestroyed() then
 		if self.ExplodeTimer and ct >= self.ExplodeTimer then
 			self:CrashExplode(self:GetPos())
@@ -350,17 +360,39 @@ function ENT:Think()
 		return true
 	end
 
-	-- ---- Freefall: wait for ignition ----
+	-- ---- Freefall phase ----
 	if not self.EngineIgnited then
+		-- Cap terminal velocity via SetVelocity on MOVETYPE_FLYGRAVITY
+		local vel = self:GetVelocity()
+		if vel.z < -FREEFALL_MAX_FALL then
+			self:SetVelocity(Vector(vel.x, vel.y, -FREEFALL_MAX_FALL))
+		end
+
+		-- Nose tilts gently nose-down while falling
+		local ang = self:GetAngles()
+		self:SetAngles(Angle(
+			Lerp(0.08, ang.p, -15),
+			ang.y,
+			Lerp(0.08, ang.r, 0)
+		))
+
 		if ct >= self.EngineIgniteTime then
 			self:IgniteEngine()
+			-- Fall through: orbit begins this same tick
 		else
 			self:NextThink(ct + 0.05)
 			return true
 		end
 	end
 
-	-- ---- Post-ignition: normal flow ----
+	-- ---- Post-ignition: vphysics safety ----
+	if not IsValid(self.PhysObj) then
+		self.PhysObj = self:GetPhysicsObject()
+	end
+	if IsValid(self.PhysObj) and self.PhysObj:IsAsleep() then
+		self.PhysObj:Wake()
+	end
+
 	if ct >= self.NextPassSound then
 		sound.Play(
 			table.Random(PASS_SOUNDS),
@@ -380,30 +412,16 @@ function ENT:Think()
 end
 
 -- ============================================================
--- PHYSICS UPDATE
+-- PHYSICS UPDATE  (only runs after ignition / vphysics active)
 -- ============================================================
 
 function ENT:PhysicsUpdate(phys)
 	if not self.DieTime or not self.sky then return end
 	if CurTime() >= self.DieTime then self:Remove() return end
 
-	-- ---- Freefall: apply drag to cap descent speed ----
-	if not self.EngineIgnited then
-		local vel = phys:GetVelocity()
-		if vel.z < -FREEFALL_MAX_SPEED then
-			-- Opposing upward force proportional to overshoot
-			local overshoot = (-vel.z) - FREEFALL_MAX_SPEED
-			phys:ApplyForceCenter(Vector(0, 0, overshoot * FREEFALL_DRAG_MASS * FrameTime()))
-		end
-		-- Keep missile oriented nose-up during freefall (slight nose-down tilt, like a real drop)
-		local ang = self:GetAngles()
-		self:SetAngles(Angle(
-			Lerp(0.06, ang.p, -15),   -- gentle nose-down
-			ang.y,
-			Lerp(0.06, ang.r, 0)
-		))
-		return
-	end
+	-- During freefall the entity is MOVETYPE_FLYGRAVITY, not vphysics.
+	-- PhysicsUpdate won't fire then, but guard just in case.
+	if not self.EngineIgnited then return end
 
 	-- ---- Destroyed: tumble ----
 	if self:IsDestroyed() then
