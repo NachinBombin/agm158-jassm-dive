@@ -11,39 +11,19 @@ local PASS_SOUNDS = {
 	"ambient/wind/wind_generic_loop2.wav",
 }
 
-local ENGINE_LOOP_SOUND = "^jet/luxor/external.wav"
-local SHARD_MODEL       = "models/props_c17/FurnitureDrawer001a_Shard01.mdl"
-local GRAVITY_MULT      = 1.5
-local SHARD_LIFE        = 8
+local ENGINE_LOOP_SOUND  = "^jet/luxor/external.wav"
+local SHARD_MODEL        = "models/props_c17/FurnitureDrawer001a_Shard01.mdl"
+local GRAVITY_MULT       = 1.5
+local SHARD_LIFE         = 8
+
+-- Freefall tuning
+local FREEFALL_DURATION  = 4.5    -- seconds before engine ignites
+local FREEFALL_MAX_SPEED = 320    -- maximum downward velocity (u/s) while chute is open
+local FREEFALL_DRAG_MASS = 6000   -- upward impulse per frame to cap speed (tweak if needed)
 
 ENT.WeaponWindow       = 8
 ENT.DIVE_Speed         = 2200
 ENT.DIVE_TrackInterval = 0.1
-
--- ============================================================
--- NET STRINGS
--- ============================================================
-util.AddNetworkString( "bombin_jassm_damage_tier" )
-
--- ============================================================
--- DAMAGE TIER HELPERS
--- ============================================================
-
-local function CalcTier( hp, maxHP )
-	local frac = hp / maxHP
-	if frac > 0.66 then return 0
-	elseif frac > 0.33 then return 1
-	elseif frac > 0 then return 2
-	else return 3
-	end
-end
-
-local function BroadcastTier( ent, tier )
-	net.Start( "bombin_jassm_damage_tier" )
-		net.WriteUInt( ent:EntIndex(), 16 )
-		net.WriteUInt( tier, 2 )
-	net.Broadcast()
-end
 
 function ENT:Debug(msg)
 	print("[Bombin JASSM] " .. tostring(msg))
@@ -62,8 +42,7 @@ function ENT:Initialize()
 	self.DIVE_ExplosionDamage = self:GetVar("DIVE_ExplosionDamage", 1200)
 	self.DIVE_ExplosionRadius = self:GetVar("DIVE_ExplosionRadius", 1200)
 
-	self.MaxHP    = 200
-	self.DamageTier = 0
+	self.MaxHP = 200
 
 	if self.CallDir:LengthSqr() <= 1 then self.CallDir = Vector(1,0,0) end
 	self.CallDir.z = 0
@@ -109,9 +88,10 @@ function ENT:Initialize()
 	self:SetBodygroup(1, 1)
 	self:SetRenderMode(RENDERMODE_NORMAL)
 
-	self:SetNWInt("HP",    self.MaxHP)
-	self:SetNWInt("MaxHP", self.MaxHP)
-	self:SetNWBool("Destroyed", false)
+	self:SetNWInt("HP",       self.MaxHP)
+	self:SetNWInt("MaxHP",    self.MaxHP)
+	self:SetNWBool("Destroyed",  false)
+	self:SetNWBool("EngineOn",   false)   -- flame hidden on client until ignition
 
 	local tangent  = Vector(-entryOffset.y, entryOffset.x, 0) * self.OrbitDir
 	local startAng = tangent:Angle()
@@ -145,16 +125,12 @@ function ENT:Initialize()
 	self.PhysObj = self:GetPhysicsObject()
 	if IsValid(self.PhysObj) then
 		self.PhysObj:Wake()
-		self.PhysObj:EnableGravity(false)
+		-- Gravity ON during freefall; disabled again at IgniteEngine
+		self.PhysObj:EnableGravity(true)
 	end
 
-	self.EngineLoop = CreateSound(self, ENGINE_LOOP_SOUND)
-	if self.EngineLoop then
-		self.EngineLoop:SetSoundLevel(130)
-		self.EngineLoop:ChangePitch(100, 0)
-		self.EngineLoop:ChangeVolume(1.0, 0.5)
-		self.EngineLoop:Play()
-	end
+	-- Engine sound intentionally NOT started here
+	self.EngineLoop = nil
 
 	self.NextPassSound = CurTime() + math.Rand(5, 10)
 
@@ -187,7 +163,54 @@ function ENT:Initialize()
 	self.ExplodeTimer    = nil
 	self.ExplodedAlready = false
 
-	self:Debug("Spawned at " .. tostring(spawnPos) .. " OrbitDir=" .. self.OrbitDir)
+	-- ---- Freefall state ----
+	self.EngineIgnited    = false
+	self.EngineIgniteTime = CurTime() + FREEFALL_DURATION
+
+	-- Spawn the parachute entity above us
+	local chute = ents.Create("ent_bombin_jassm_chute")
+	if IsValid(chute) then
+		chute:SetOwner(self)
+		chute:SetPos(spawnPos + Vector(0, 0, 105))
+		chute:SetAngles(Angle(0, startAng.y, 0))
+		chute:Spawn()
+		chute:Activate()
+		self.ChuteEnt = chute
+	end
+
+	self:Debug("Spawned (freefall) at " .. tostring(spawnPos) .. " ignite in " .. FREEFALL_DURATION .. "s")
+end
+
+-- ============================================================
+-- IGNITION
+-- ============================================================
+
+function ENT:IgniteEngine()
+	if self.EngineIgnited then return end
+	self.EngineIgnited = true
+	self:SetNWBool("EngineOn", true)
+
+	-- Kill gravity, hand control back to orbit logic
+	if IsValid(self.PhysObj) then
+		self.PhysObj:EnableGravity(false)
+		-- Give a small forward kick so orbit takes over smoothly
+		local fwd = self:GetForward()
+		fwd.z = 0
+		self.PhysObj:SetVelocity(fwd * self.Speed)
+	end
+
+	-- Start engine loop
+	self.EngineLoop = CreateSound(self, ENGINE_LOOP_SOUND)
+	if self.EngineLoop then
+		self.EngineLoop:SetSoundLevel(130)
+		self.EngineLoop:ChangePitch(100, 0)
+		self.EngineLoop:ChangeVolume(1.0, 0.5)
+		self.EngineLoop:Play()
+	end
+
+	-- Chute entity will self-detach on its next Think() because EngineOn is now true
+
+	self:Debug("Engine ignited -- orbit begins")
 end
 
 -- ============================================================
@@ -244,8 +267,11 @@ function ENT:SetDestroyed()
 	self:SetNWBool("Destroyed", true)
 	self.DestroyedTime = CurTime()
 
-	-- Broadcast final tier (3 = critical/destroyed) for client FX
-	BroadcastTier( self, 3 )
+	-- Force-remove the chute on destruction
+	if IsValid(self.ChuteEnt) then
+		self.ChuteEnt:Remove()
+		self.ChuteEnt = nil
+	end
 
 	if IsValid(self.PhysObj) then
 		local existing = self.PhysObj:GetAngleVelocity()
@@ -289,13 +315,6 @@ function ENT:OnTakeDamage(dmginfo)
 	hp = hp - dmginfo:GetDamage()
 	self:SetNWInt("HP", hp)
 
-	-- Update damage tier and broadcast to clients when it changes
-	local tier = CalcTier( hp, self.MaxHP )
-	if tier ~= self.DamageTier then
-		self.DamageTier = tier
-		BroadcastTier( self, tier )
-	end
-
 	if hp <= 0 and not self:IsDestroyed() then
 		self:Debug("Shot down!")
 		self:SetDestroyed()
@@ -331,6 +350,17 @@ function ENT:Think()
 		return true
 	end
 
+	-- ---- Freefall: wait for ignition ----
+	if not self.EngineIgnited then
+		if ct >= self.EngineIgniteTime then
+			self:IgniteEngine()
+		else
+			self:NextThink(ct + 0.05)
+			return true
+		end
+	end
+
+	-- ---- Post-ignition: normal flow ----
 	if ct >= self.NextPassSound then
 		sound.Play(
 			table.Random(PASS_SOUNDS),
@@ -356,6 +386,24 @@ end
 function ENT:PhysicsUpdate(phys)
 	if not self.DieTime or not self.sky then return end
 	if CurTime() >= self.DieTime then self:Remove() return end
+
+	-- ---- Freefall: apply drag to cap descent speed ----
+	if not self.EngineIgnited then
+		local vel = phys:GetVelocity()
+		if vel.z < -FREEFALL_MAX_SPEED then
+			-- Opposing upward force proportional to overshoot
+			local overshoot = (-vel.z) - FREEFALL_MAX_SPEED
+			phys:ApplyForceCenter(Vector(0, 0, overshoot * FREEFALL_DRAG_MASS * FrameTime()))
+		end
+		-- Keep missile oriented nose-up during freefall (slight nose-down tilt, like a real drop)
+		local ang = self:GetAngles()
+		self:SetAngles(Angle(
+			Lerp(0.06, ang.p, -15),   -- gentle nose-down
+			ang.y,
+			Lerp(0.06, ang.r, 0)
+		))
+		return
+	end
 
 	-- ---- Destroyed: tumble ----
 	if self:IsDestroyed() then
@@ -691,4 +739,5 @@ end
 
 function ENT:OnRemove()
 	if self.EngineLoop then self.EngineLoop:Stop() end
+	if IsValid(self.ChuteEnt) then self.ChuteEnt:Remove() end
 end
