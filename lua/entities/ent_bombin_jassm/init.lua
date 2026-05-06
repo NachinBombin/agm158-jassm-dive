@@ -68,8 +68,26 @@ function ENT:Initialize()
 	local entryRad    = self.OrbitAngle
 	local entryOffset = Vector(math.cos(entryRad), math.sin(entryRad), 0)
 
-	local orbitXY = self.CenterPos + entryOffset * (self.OrbitRadius * 1.05)
-	local spawnPos = Vector(orbitXY.x, orbitXY.y, self.sky + FREEFALL_DROP)
+	-- ----------------------------------------------------------------
+	-- Spawn position: prefer the tail position passed by the AC-130.
+	-- When PlaneTailPos is set the missile and chute appear exactly at
+	-- the plane's tail.  When deployed standalone the original orbit-
+	-- entry calculation is used as a fallback.
+	-- ----------------------------------------------------------------
+	local planeTailPos = self:GetVar("PlaneTailPos", nil)
+	local spawnPos
+
+	if planeTailPos then
+		-- Use the tail position provided by the AC-130 directly.
+		-- Z already includes FREEFALL_DROP (set by UpdateJASSM).
+		spawnPos = planeTailPos
+		self:Debug("Spawning at AC-130 tail: " .. tostring(spawnPos))
+	else
+		-- Standalone / no parent plane: compute orbit-entry position.
+		local orbitXY = self.CenterPos + entryOffset * (self.OrbitRadius * 1.05)
+		spawnPos = Vector(orbitXY.x, orbitXY.y, self.sky + FREEFALL_DROP)
+		self:Debug("Spawning standalone at orbit-entry: " .. tostring(spawnPos))
+	end
 
 	if not util.IsInWorld(spawnPos) then
 		spawnPos = Vector(self.CenterPos.x, self.CenterPos.y, self.sky + FREEFALL_DROP)
@@ -158,11 +176,12 @@ function ENT:Initialize()
 	self.EngineIgnited = false
 	self.ChuteEnt      = nil
 
-	-- Spawn chute immediately (missile is already at spawnPos)
+	-- Spawn chute at the same XY as the missile, 105u above it.
+	-- When we came from the AC-130 tail this is exactly at the tail.
 	local chute = ents.Create("ent_bombin_jassm_chute")
 	if IsValid(chute) then
 		chute:SetOwner(self)
-		chute:SetPos(spawnPos + Vector(0, 0, 105))
+		chute:SetPos(Vector(spawnPos.x, spawnPos.y, spawnPos.z + 105))
 		chute:SetAngles(Angle(0, startAng.y, 0))
 		chute:Spawn()
 		chute:Activate()
